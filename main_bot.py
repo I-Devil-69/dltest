@@ -58,11 +58,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "cross-site"
         }
-        # List of free proxies (replace with fresh ones from free-proxy-list.net)
+        # List of provided proxies
         proxies = [
-            "http://103.249.121.11:80",  # Example proxy (India-based, replace if down)
-            "http://219.65.73.81:80",  # Example proxy (replace if down)
-            "http://103.117.15.10:8080"  # Example proxy (replace if down)
+            "http://219.65.73.81:80",
+            "http://103.249.121.11:80",
+            "http://103.117.15.10:8080"
         ]
         for proxy in proxies:
             try:
@@ -107,12 +107,25 @@ def home():
 
 # === ENTRY POINT ===
 async def main():
-    await app_bot.initialize()
-    await app_bot.start()
-    await app_bot.updater.start_polling()
-    config = uvicorn.Config(web_app, host="0.0.0.0", port=PORT, log_level="info")
-    server = uvicorn.Server(config)
-    await server.serve()
+    try:
+        # Ensure no webhook is active
+        await app_bot.bot.delete_webhook(drop_pending_updates=True)
+        # Clear any pending updates to avoid conflicts
+        await app_bot.bot.get_updates(offset=-1)
+        # Start the bot
+        await app_bot.initialize()
+        await app_bot.start()
+        await app_bot.updater.start_polling(drop_pending_updates=True)
+        # Start FastAPI server
+        config = uvicorn.Config(web_app, host="0.0.0.0", port=PORT, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+    except telegram.error.Conflict as e:
+        logger.error(f"Conflict error during startup: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during startup: {e}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())
