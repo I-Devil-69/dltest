@@ -41,7 +41,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid filename in URL.")
         return
 
-    await update.message.reply_text("Downloading file...")
+    await update.message.reply_text("Downloading file via proxy...")
 
     try:
         headers = {
@@ -58,25 +58,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "cross-site"
         }
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            async with session.get(url, headers=headers, allow_redirects=True) as resp:
-                logger.info(f"Response URL: {resp.url}")
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    logger.error(f"Download failed: HTTP {resp.status}, Response: {error_text}, Final URL: {resp.url}")
-                    await update.message.reply_text(f"Download failed: HTTP {resp.status}. The server may require specific headers or restrict bot access.")
-                    return
-                content_length = int(resp.headers.get("Content-Length", 0))
-                if content_length > 50_000_000:
-                    await update.message.reply_text("File too large for Telegram (max 50 MB).")
-                    return
-                data = io.BytesIO(await resp.read())
-                data.name = filename
-                await update.message.reply_document(document=data, filename=filename)
+        # List of free proxies (replace with fresh ones from free-proxy-list.net)
+        proxies = [
+            "http://103.177.233.193:80",  # Example proxy (India-based, replace if down)
+            "http://47.251.43.115:3128",  # Example proxy (replace if down)
+            "http://152.42.226.140:8080"  # Example proxy (replace if down)
+        ]
+        for proxy in proxies:
+            try:
+                logger.info(f"Trying proxy: {proxy}")
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    async with session.get(url, headers=headers, proxy=proxy, allow_redirects=True) as resp:
+                        logger.info(f"Response URL: {resp.url}")
+                        if resp.status == 200:
+                            content_length = int(resp.headers.get("Content-Length", 0))
+                            if content_length > 50_000_000:
+                                await update.message.reply_text("File too large for Telegram (max 50 MB).")
+                                return
+                            data = io.BytesIO(await resp.read())
+                            data.name = filename
+                            await update.message.reply_document(document=data, filename=filename)
+                            return
+                        else:
+                            error_text = await resp.text()
+                            logger.error(f"Proxy {proxy} failed: HTTP {resp.status}, Response: {error_text}")
+            except aiohttp.ClientError as e:
+                logger.error(f"Proxy {proxy} error: {e}")
+                continue
+        await update.message.reply_text("Download failed: All proxies returned HTTP 403 or errors. The server restricts access based on location.")
 
-    except aiohttp.ClientError as e:
-        logger.error(f"Network error for {url}: {e}")
-        await update.message.reply_text(f"Network error: {e}")
     except telegram.error.TelegramError as e:
         logger.error(f"Telegram error for {url}: {e}")
         await update.message.reply_text(f"Telegram error: {e}")
