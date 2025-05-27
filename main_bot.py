@@ -1,14 +1,30 @@
+import os
+import asyncio
+import aiohttp
 from urllib.parse import urlparse, parse_qs
 from werkzeug.utils import secure_filename
-import aiohttp
 from telegram import Update
-from telegram.ext import ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from fastapi import FastAPI
+import uvicorn
 import logging
 import io
 from pathlib import Path
 
+# === CONFIG ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set.")
+PORT = int(os.getenv("PORT", 10000))  # Use Render's PORT or default to 10000
+
+# === TELEGRAM BOT ===
+app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send me a direct download link. I’ll fetch and send the file.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
@@ -23,12 +39,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filename = secure_filename(Path(parsed.path).name)
     if not filename:
         await update.message.reply_text("Invalid filename in URL.")
-        return
-
-    # Check for pre-signed URL
-    query_params = parse_qs(parsed.query)
-    if "X-Amz-Expires" in query_params:
-        await update.message.reply_text("This appears to be a pre-signed URL. It may have expired. Please provide a fresh link.")
         return
 
     await update.message.reply_text("Downloading file...")
@@ -73,3 +83,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Unexpected error for {url}: {e}")
         await update.message.reply_text(f"Error: {e}")
+
+# === HANDLERS ===
+app_bot.add_handler(CommandHandler("start", start))
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+# === FASTAPI SERVER ===
+web_app = FastAPI()
+
+@web_app.get("/")
+def home():
+    return {"status": "Bot is running on Render!"}
+
+# === ENTRY POINT ===
+async def main():
+    await app_bot.initialize()
+    await app_bot.start()
+    await app_bot.updater.start_polling()
+    config = uvicorn.Config(web_app, host="0.0.0.0", port=PORT, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
