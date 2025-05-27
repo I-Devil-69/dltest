@@ -1,64 +1,73 @@
 import os
-import aiohttp
 import asyncio
-import threading
+import aiohttp
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from fastapi import FastAPI
 import uvicorn
+from urllib.parse import urlparse
+from pathlib import Path
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# === CONFIG ===
+BOT_TOKEN = os.getenv("BOT_TOKEN", "your-telegram-bot-token")  # Add BOT_TOKEN in Render Environment Variables
 
-# Dummy FastAPI web app
-app = FastAPI()
+# === TELEGRAM BOT ===
+app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
 
-@app.get("/")
-def root():
-    return {"message": "Bot is running."}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send me a direct download link. I’ll fetch and send the file.")
 
-# Custom headers for 403 bypass
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Android 13; Mobile; rv:109.0) Gecko/112 Firefox/112"
-}
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send /get <url> to download and receive the file.")
-
-async def get_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) == 0:
-        await update.message.reply_text("Please provide a valid URL.")
+    # Validate link
+    if not url.startswith("http"):
+        await update.message.reply_text("Please send a valid direct download link.")
         return
 
-    url = context.args[0]
-    filename = url.split("/")[-1]
+    await update.message.reply_text("Downloading file...")
 
     try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
-            async with session.get(url) as resp:
+        filename = Path(urlparse(url).path).name
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://utkarshapp.com"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    await update.message.reply_text(f"Failed to download: {resp.status}")
+                    await update.message.reply_text(f"Download failed: HTTP {resp.status}")
                     return
                 data = await resp.read()
-
                 with open(filename, "wb") as f:
                     f.write(data)
 
-        await update.message.reply_document(document=open(filename, "rb"))
+        await update.message.reply_document(document=open(filename, "rb"), filename=filename)
         os.remove(filename)
 
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
-def run_bot():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start_command))
-    app_bot.add_handler(CommandHandler("get", get_command))
-    print("Bot started...")
-    app_bot.run_polling()
+# === HANDLERS ===
+app_bot.add_handler(CommandHandler("start", start))
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Start bot in background thread
-threading.Thread(target=run_bot).start()
+# === FASTAPI SERVER ===
+web_app = FastAPI()
 
-# Start FastAPI (Render will call this)
+@web_app.get("/")
+def home():
+    return {"status": "Bot is running on Render!"}
+
+# === ENTRY POINT ===
+async def main():
+    await app_bot.initialize()
+    await app_bot.start()
+    await app_bot.updater.start_polling()
+    await app_bot.updater.idle()
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    uvicorn.run(web_app, host="0.0.0.0", port=10000)
