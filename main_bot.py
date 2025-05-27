@@ -60,9 +60,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         # List of free proxies (replace with fresh ones from free-proxy-list.net)
         proxies = [
-            "http://103.177.233.193:80",  # Example proxy (India-based, replace if down)
-            "http://47.251.43.115:3128",  # Example proxy (replace if down)
-            "http://152.42.226.140:8080"  # Example proxy (replace if down)
+            "http://103.249.121.11:80",  # Example proxy (India-based, replace if down)
+            "http://219.65.73.81:80",  # Example proxy (replace if down)
+            "http://103.117.15.10:8080"  # Example proxy (replace if down)
         ]
         for proxy in proxies:
             try:
